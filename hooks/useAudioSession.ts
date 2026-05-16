@@ -1,15 +1,17 @@
 import {
-  AUDIO_ANALYSER_READ_INTERVAL_MS,
+  DEFAULT_AUDIO_ANALYSER_READ_INTERVAL_MS,
   type AudioMetricRefs,
   decayAudioMetrics,
+  getAudioFrameMetrics,
   resetAudioMetrics,
   updateAudioMetrics,
-} from "@/audio/audio-metrics";
+} from "@/audio/audioMetrics";
+import "@/audio/suppressAudioApiWarnings";
 import {
   closeSampleAudioContext,
   getCurrentSampleAudioContext,
   getSampleAudioContext,
-} from "@/audio/sample-audio-context";
+} from "@/audio/sampleAudioContext";
 import type { AudioSource, MicStatus } from "@/audio/types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -17,7 +19,9 @@ import type {
   AudioBuffer,
   AudioBufferSourceNode,
 } from "react-native-audio-api";
-import { AudioManager, AudioRecorder } from "react-native-audio-api";
+
+const { AudioManager, AudioRecorder } =
+  require("react-native-audio-api") as typeof import("react-native-audio-api");
 
 const recorder = new AudioRecorder();
 const voiceSampleAsset = require("../assets/audio/voice-sample-landing.mp3");
@@ -29,6 +33,7 @@ export const useAudioSession = () => {
   const smoothedLevelRef = useRef(0);
   const smoothedPeakRef = useRef(0);
   const lastAnalyserReadAtRef = useRef(0);
+  const audioReadIdRef = useRef(0);
   const sampleBufferRef = useRef<AudioBuffer | null>(null);
   const sampleSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const sampleAnalyserRef = useRef<AnalyserNode | null>(null);
@@ -45,6 +50,7 @@ export const useAudioSession = () => {
       smoothedLevelRef,
       smoothedPeakRef,
       lastAnalyserReadAtRef,
+      audioReadIdRef,
     }),
     [],
   );
@@ -241,25 +247,29 @@ export const useAudioSession = () => {
     [audioSource, micStatus, stopActiveSource],
   );
 
-  const readAudioFrame = useCallback(() => {
-    const now = Date.now();
-    const sampleAnalyser = sampleAnalyserRef.current;
-    const sampleData = sampleDataRef.current;
+  const readAudioFrame = useCallback(
+    (analyserReadIntervalMs = DEFAULT_AUDIO_ANALYSER_READ_INTERVAL_MS) => {
+      const now = Date.now();
+      const sampleAnalyser = sampleAnalyserRef.current;
+      const sampleData = sampleDataRef.current;
 
-    if (
-      audioSource === "voiceSample" &&
-      micStatus === "listening" &&
-      sampleAnalyser &&
-      sampleData &&
-      now - lastAnalyserReadAtRef.current >= AUDIO_ANALYSER_READ_INTERVAL_MS
-    ) {
-      lastAnalyserReadAtRef.current = now;
-      sampleAnalyser.getFloatTimeDomainData(sampleData);
-      updateIncomingAudioMetrics(sampleData, sampleData.length, 5.6);
-    }
+      if (
+        audioSource === "voiceSample" &&
+        micStatus === "listening" &&
+        sampleAnalyser &&
+        sampleData &&
+        now - lastAnalyserReadAtRef.current >= analyserReadIntervalMs
+      ) {
+        lastAnalyserReadAtRef.current = now;
+        sampleAnalyser.getFloatTimeDomainData(sampleData);
+        updateIncomingAudioMetrics(sampleData, sampleData.length, 5.6);
+      }
 
-    decayAudioMetrics(audioMetricRefs);
-  }, [audioMetricRefs, audioSource, micStatus, updateIncomingAudioMetrics]);
+      decayAudioMetrics(audioMetricRefs);
+      return getAudioFrameMetrics(audioMetricRefs);
+    },
+    [audioMetricRefs, audioSource, micStatus, updateIncomingAudioMetrics],
+  );
 
   useEffect(() => {
     return () => {

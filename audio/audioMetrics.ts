@@ -1,4 +1,4 @@
-export const AUDIO_ANALYSER_READ_INTERVAL_MS = 50;
+export const DEFAULT_AUDIO_ANALYSER_READ_INTERVAL_MS = 50;
 
 type NumberRef = {
   current: number;
@@ -11,6 +11,25 @@ export type AudioMetricRefs = {
   smoothedLevelRef: NumberRef;
   smoothedPeakRef: NumberRef;
   lastAnalyserReadAtRef: NumberRef;
+  audioReadIdRef: NumberRef;
+};
+
+export type AudioFrameMetrics = {
+  level: number;
+  peak: number;
+  brightness: number;
+  smoothedLevel: number;
+  smoothedPeak: number;
+  readId: number;
+};
+
+export const SILENT_AUDIO_FRAME: AudioFrameMetrics = {
+  level: 0,
+  peak: 0,
+  brightness: 0,
+  smoothedLevel: 0,
+  smoothedPeak: 0,
+  readId: 0,
 };
 
 export const extractSampleMetrics = (
@@ -49,6 +68,7 @@ export const resetAudioMetrics = ({
   smoothedLevelRef,
   smoothedPeakRef,
   lastAnalyserReadAtRef,
+  audioReadIdRef,
 }: AudioMetricRefs) => {
   audioLevelRef.current = 0;
   audioPeakRef.current = 0;
@@ -56,10 +76,16 @@ export const resetAudioMetrics = ({
   smoothedLevelRef.current = 0;
   smoothedPeakRef.current = 0;
   lastAnalyserReadAtRef.current = 0;
+  audioReadIdRef.current = 0;
 };
 
 export const updateAudioMetrics = (
-  { audioLevelRef, audioPeakRef, audioBrightnessRef }: AudioMetricRefs,
+  {
+    audioLevelRef,
+    audioPeakRef,
+    audioBrightnessRef,
+    audioReadIdRef,
+  }: AudioMetricRefs,
   samples: Float32Array,
   sampleCount: number,
   levelScale: number,
@@ -71,6 +97,7 @@ export const updateAudioMetrics = (
   audioLevelRef.current = scaledLevel;
   audioPeakRef.current = Math.max(audioPeakRef.current * 0.72, scaledPeak);
   audioBrightnessRef.current = Math.min(1, brightness * 18);
+  audioReadIdRef.current += 1;
 };
 
 export const decayAudioMetrics = ({
@@ -90,3 +117,19 @@ export const decayAudioMetrics = ({
   audioPeakRef.current *= 0.94;
   audioBrightnessRef.current *= 0.94;
 };
+
+export const getAudioFrameMetrics = ({
+  audioLevelRef,
+  audioPeakRef,
+  audioBrightnessRef,
+  smoothedLevelRef,
+  smoothedPeakRef,
+  audioReadIdRef,
+}: AudioMetricRefs): AudioFrameMetrics => ({
+  level: audioLevelRef.current,
+  peak: audioPeakRef.current,
+  brightness: audioBrightnessRef.current,
+  smoothedLevel: smoothedLevelRef.current,
+  smoothedPeak: smoothedPeakRef.current,
+  readId: audioReadIdRef.current,
+});

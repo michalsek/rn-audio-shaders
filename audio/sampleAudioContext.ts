@@ -1,6 +1,10 @@
-import { AudioContext } from "react-native-audio-api";
+import "@/audio/suppressAudioApiWarnings";
+import type { AudioContext as AudioContextType } from "react-native-audio-api";
 
-let sampleAudioContext: AudioContext | null = null;
+const { AudioContext } =
+  require("react-native-audio-api") as typeof import("react-native-audio-api");
+
+let sampleAudioContext: AudioContextType | null = null;
 
 export const getSampleAudioContext = () => {
   if (!sampleAudioContext) {
