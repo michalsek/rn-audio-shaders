@@ -30,6 +30,13 @@
     "plugins": [
       "expo-router",
       [
+        "react-native-audio-api",
+        {
+          "iosMicrophonePermission": "Allow rn-audio-shader to use the microphone for audio-reactive visuals.",
+          "androidPermissions": ["android.permission.RECORD_AUDIO"]
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-icon.png",
