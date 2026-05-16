@@ -1,98 +1,93 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import {
+  useConfigureContext,
+  useFrame,
+  useRoot,
+  useUniform,
+} from "@typegpu/react";
+import { useEffect, useMemo } from "react";
+import {
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from "react-native-reanimated";
+import { Canvas } from "react-native-wgpu";
+import { d, tgpu } from "typegpu";
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+const positions = tgpu.const(d.arrayOf(d.vec2f, 3), [
+  d.vec2f(0, 0.5),
+  d.vec2f(-0.5, -0.5),
+  d.vec2f(0.5, -0.5),
+]);
 
-export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+export function Home() {
+  const topCX = useSharedValue(0);
+  const topCY = useSharedValue(0);
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
-  );
+  const root = useRoot();
+  const topCornerOffset = useUniform(d.vec2f);
+
+  const pipeline = useMemo(() => {
+    return root.createRenderPipeline({
+      vertex: ({ $vertexIndex: vid }) => {
+        "use gpu";
+
+        let offset = d.vec2f(0, 0);
+
+        if (vid === 0) {
+          offset = d.vec2f(topCornerOffset.$);
+        }
+
+        return {
+          $position: d.vec4f(positions.$[vid].add(offset), 0, 1),
+        };
+      },
+      fragment: () => {
+        "use gpu";
+        return d.vec4f(0.114, 0.447, 0.941, 1);
+      },
+    });
+  }, [root, topCornerOffset]);
+
+  const { ref, ctxRef } = useConfigureContext({ alphaMode: "premultiplied" });
+
+  useEffect(() => {
+    topCX.value = withRepeat(
+      withSequence(
+        withTiming(-0.5, { duration: 1000 }),
+        withTiming(0.25, { duration: 1000 }),
+        withTiming(0.5, { duration: 1000 }),
+        withTiming(0.25, { duration: 1000 }),
+        withTiming(-0.5, { duration: 1000 }),
+      ),
+      -1,
+    );
+
+    topCY.value = withRepeat(
+      withSequence(
+        withTiming(-0.5, { duration: 1000 }),
+        withTiming(-0.25, { duration: 1000 }),
+        withTiming(-0.5, { duration: 1000 }),
+      ),
+      -1,
+    );
+  }, [topCX, topCY]);
+
+  useFrame(() => {
+    const ctx = ctxRef.current;
+
+    if (!ctx) {
+      return;
+    }
+
+    topCornerOffset.write(d.vec2f(topCX.value, topCY.value));
+    pipeline.withColorAttachment({ view: ctx }).draw(3);
+
+    // A react-native-wgpu requirement for flushing the rendered effect
+    ctx.present?.();
+  });
+
+  return <Canvas ref={ref} style={{ aspectRatio: 1 }} transparent />;
 }
 
-const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-  },
-});
+export default Home;

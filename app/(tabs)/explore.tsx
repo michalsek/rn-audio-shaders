@@ -1,112 +1,81 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { useConfigureContext, useFrame, useRoot } from "@typegpu/react";
+import { useMemo } from "react";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Canvas } from "react-native-wgpu";
+import { d, std, tgpu } from "typegpu";
 
-import { Collapsible } from '@/components/ui/collapsible';
-import { ExternalLink } from '@/components/external-link';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Fonts } from '@/constants/theme';
+const positions = tgpu.const(d.arrayOf(d.vec2f, 6), [
+  d.vec2f(-1, -1),
+  d.vec2f(1, -1),
+  d.vec2f(-1, 1),
+  d.vec2f(-1, 1),
+  d.vec2f(1, -1),
+  d.vec2f(1, 1),
+]);
 
-export default function TabTwoScreen() {
+export function Home() {
+  const root = useRoot();
+
+  const pipeline = useMemo(() => {
+    return root.createRenderPipeline({
+      vertex: ({ $vertexIndex: vid }) => {
+        "use gpu";
+
+        const position = positions.$[vid];
+        const uv = position.mul(0.5).add(d.vec2f(0.5));
+
+        return {
+          $position: d.vec4f(position, 0, 1),
+          uv,
+        };
+      },
+      fragment: ({ uv }) => {
+        "use gpu";
+
+        const bottomLeft = d.vec3f(1, 0.12, 0.36);
+        const bottomRight = d.vec3f(1, 0.72, 0.08);
+        const topLeft = d.vec3f(0.04, 0.82, 1);
+        const topRight = d.vec3f(0.56, 0.2, 1);
+        const bottom = std.mix(bottomLeft, bottomRight, uv.x);
+        const top = std.mix(topLeft, topRight, uv.x);
+        const color = std.mix(bottom, top, uv.y);
+
+        return d.vec4f(color, 1);
+      },
+    });
+  }, [root]);
+
+  const { ref, ctxRef } = useConfigureContext({ alphaMode: "premultiplied" });
+
+  useFrame(() => {
+    const ctx = ctxRef.current;
+
+    if (!ctx) {
+      return;
+    }
+
+    pipeline.withColorAttachment({ view: ctx }).draw(6);
+
+    // A react-native-wgpu requirement for flushing the rendered effect
+    ctx.present?.();
+  });
+
+  const insets = useSafeAreaInsets();
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#D0D0D0', dark: '#353636' }}
-      headerImage={
-        <IconSymbol
-          size={310}
-          color="#808080"
-          name="chevron.left.forwardslash.chevron.right"
-          style={styles.headerImage}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText
-          type="title"
-          style={{
-            fontFamily: Fonts.rounded,
-          }}>
-          Explore
-        </ThemedText>
-      </ThemedView>
-      <ThemedText>This app includes example code to help you get started.</ThemedText>
-      <Collapsible title="File-based routing">
-        <ThemedText>
-          This app has two screens:{' '}
-          <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> and{' '}
-          <ThemedText type="defaultSemiBold">app/(tabs)/explore.tsx</ThemedText>
-        </ThemedText>
-        <ThemedText>
-          The layout file in <ThemedText type="defaultSemiBold">app/(tabs)/_layout.tsx</ThemedText>{' '}
-          sets up the tab navigator.
-        </ThemedText>
-        <ExternalLink href="https://docs.expo.dev/router/introduction">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Android, iOS, and web support">
-        <ThemedText>
-          You can open this project on Android, iOS, and the web. To open the web version, press{' '}
-          <ThemedText type="defaultSemiBold">w</ThemedText> in the terminal running this project.
-        </ThemedText>
-      </Collapsible>
-      <Collapsible title="Images">
-        <ThemedText>
-          For static images, you can use the <ThemedText type="defaultSemiBold">@2x</ThemedText> and{' '}
-          <ThemedText type="defaultSemiBold">@3x</ThemedText> suffixes to provide files for
-          different screen densities
-        </ThemedText>
-        <Image
-          source={require('@/assets/images/react-logo.png')}
-          style={{ width: 100, height: 100, alignSelf: 'center' }}
-        />
-        <ExternalLink href="https://reactnative.dev/docs/images">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Light and dark mode components">
-        <ThemedText>
-          This template has light and dark mode support. The{' '}
-          <ThemedText type="defaultSemiBold">useColorScheme()</ThemedText> hook lets you inspect
-          what the user&apos;s current color scheme is, and so you can adjust UI colors accordingly.
-        </ThemedText>
-        <ExternalLink href="https://docs.expo.dev/develop/user-interface/color-themes/">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Animations">
-        <ThemedText>
-          This template includes an example of an animated component. The{' '}
-          <ThemedText type="defaultSemiBold">components/HelloWave.tsx</ThemedText> component uses
-          the powerful{' '}
-          <ThemedText type="defaultSemiBold" style={{ fontFamily: Fonts.mono }}>
-            react-native-reanimated
-          </ThemedText>{' '}
-          library to create a waving hand animation.
-        </ThemedText>
-        {Platform.select({
-          ios: (
-            <ThemedText>
-              The <ThemedText type="defaultSemiBold">components/ParallaxScrollView.tsx</ThemedText>{' '}
-              component provides a parallax effect for the header image.
-            </ThemedText>
-          ),
-        })}
-      </Collapsible>
-    </ParallaxScrollView>
+    <Canvas
+      ref={ref}
+      style={{
+        width: "100%",
+        aspectRatio: 1,
+        marginTop: insets.top,
+        marginBottom: insets.bottom,
+        marginLeft: insets.left,
+        marginRight: insets.right,
+      }}
+      transparent
+    />
   );
 }
 
-const styles = StyleSheet.create({
-  headerImage: {
-    color: '#808080',
-    bottom: -90,
-    left: -35,
-    position: 'absolute',
-  },
-  titleContainer: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-});
+export default Home;
