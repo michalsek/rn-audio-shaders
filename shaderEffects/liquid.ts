@@ -1,13 +1,14 @@
 import tgpu, { d, std } from "typegpu";
 
-import type { ShaderEffectFactory } from "./types";
+import type { ShaderEffectCanvasSize, ShaderEffectFactory } from "./types";
 
-const SIM_SIZE = 512;
+const DEFAULT_SIM_SIZE = 256;
+const MIN_SIM_SIZE = 128;
+const MAX_SIM_SIZE = 512;
 const WORKGROUP_SIZE = 16;
 const MAX_DROPLETS = 1;
 const AUDIO_ANALYSER_READ_INTERVAL_MS = 150;
-const DROPLET_POINT_RADIUS = 2.5 / SIM_SIZE;
-const WAVE_SPEED = 0.14;
+const WAVE_SPEED = 0.5;
 const ENABLE_AUDIO_BACKGROUND_RIPPLE = false;
 
 const positions = tgpu.const(d.arrayOf(d.vec2f, 3), [
@@ -36,6 +37,7 @@ const LiquidParams = d.struct({
   audioLevel: d.f32,
   brightness: d.f32,
   damping: d.f32,
+  canvasScale: d.vec2f,
 });
 
 type LiquidParamsValue = d.InferInput<typeof LiquidParams>;
@@ -71,6 +73,7 @@ const createParams = (
   time: number,
   audioLevel: number,
   brightness: number,
+  canvasScale: d.v2f,
 ): LiquidParamsValue => ({
   droplets,
   dropCount,
@@ -78,9 +81,37 @@ const createParams = (
   audioLevel,
   brightness,
   damping: 0.996,
+  canvasScale,
 });
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+
+const getLiquidSimulationSize = ({ width, height }: ShaderEffectCanvasSize) => {
+  const shortestSide = Math.min(width, height);
+
+  if (!Number.isFinite(shortestSide) || shortestSide <= 0) {
+    return DEFAULT_SIM_SIZE;
+  }
+
+  return Math.max(
+    MIN_SIM_SIZE,
+    Math.min(MAX_SIM_SIZE, Math.round(shortestSide)),
+  );
+};
+
+const getDropletPointRadius = (simSize: number) => 4 / simSize;
+
+const getCanvasScale = ({ width, height }: ShaderEffectCanvasSize) => {
+  if (width <= 0 || height <= 0) {
+    return d.vec2f(1, 1);
+  }
+
+  const aspectRatio = width / height;
+
+  return aspectRatio < 1
+    ? d.vec2f(aspectRatio, 1)
+    : d.vec2f(1, 1 / aspectRatio);
+};
 
 const advanceFn = tgpu.computeFn({
   workgroupSize: [WORKGROUP_SIZE, WORKGROUP_SIZE],
@@ -178,7 +209,7 @@ const advanceFn = tgpu.computeFn({
       const droplet = simulationLayout.$.params.droplets[i];
       const delta = std.sub(uv, droplet.position);
       const distance = std.length(delta);
-      const radius = std.max(d.f32(1.1 / SIM_SIZE), droplet.radius);
+      const radius = std.max(d.f32(1.1) / d.f32(texSize.x), droplet.radius);
       const coreRatio = distance / radius;
       const core = std.exp(-(coreRatio * coreRatio));
       const splash = droplet.strength * core;
@@ -203,8 +234,11 @@ const advanceFn = tgpu.computeFn({
   const initialDissolve = std.smoothstep(0.05, 0.2, waveEnergy);
   const finalDissolve = 1 - std.smoothstep(0.006, 0.026, waveEnergy);
   const shapedDamping =
-    simulationLayout.$.params.damping - initialDissolve * 0.018 - finalDissolve * 0.012;
-  const heightDamping = 0.99975 - initialDissolve * 0.0008 - finalDissolve * 0.0045;
+    simulationLayout.$.params.damping -
+    initialDissolve * 0.018 -
+    finalDissolve * 0.012;
+  const heightDamping =
+    0.99975 - initialDissolve * 0.0008 - finalDissolve * 0.0045;
   let velocity =
     center.y * shapedDamping +
     (fourWayLap * 0.8 + diagonalLap * 0.2 + collision * 0.13) * waveSpeed +
@@ -241,7 +275,14 @@ const fragmentFn = tgpu.fragmentFn({
 })((input) => {
   "use gpu";
 
-  const uv = std.clamp(input.uv, d.vec2f(0), d.vec2f(1));
+  const uv = std.clamp(
+    std.add(
+      std.mul(std.sub(input.uv, d.vec2f(0.5)), renderLayout.$.params.canvasScale),
+      d.vec2f(0.5),
+    ),
+    d.vec2f(0),
+    d.vec2f(1),
+  );
   const texSize = std.textureDimensions(renderLayout.$.field);
   const texel = std.div(d.vec2f(1), d.vec2f(texSize));
   const center = std.textureSampleLevel(
@@ -294,12 +335,13 @@ const fragmentFn = tgpu.fragmentFn({
     );
   const heightGlow = std.smoothstep(0.018, 0.16, std.abs(center.x));
   const foam = std.smoothstep(0.16, 0.9, center.z);
-  const freshWave = std.smoothstep(0.012, 0.08, std.abs(center.y)) *
+  const freshWave =
+    std.smoothstep(0.012, 0.08, std.abs(center.y)) *
     std.smoothstep(0.05, 0.5, center.z);
-  const deep = d.vec3f(0.098, 0.698, 0.82);
-  const glass = d.vec3f(0.08, 0.28, 0.31);
-  const highlight = d.vec3f(0.72, 0.9, 0.92);
-  const shadow = d.vec3f(0.173, 0.82, 0.949);
+  const deep = d.vec3f(0.22, 0.675, 0.867);
+  const glass = d.vec3f(0.357, 0.725, 0.878);
+  const highlight = d.vec3f(0.882, 0.953, 0.98);
+  const shadow = d.vec3f(0.71, 0.882, 0.945);
   let color = std.mix(deep, glass, 0.42 + diffuse * 0.3);
 
   color = std.mix(color, shadow, std.clamp(-center.x * 0.9, 0, 0.34));
@@ -313,7 +355,7 @@ const fragmentFn = tgpu.fragmentFn({
   color = std.add(
     color,
     std.mul(
-      d.vec3f(0.09, 0.22, 0.2),
+      d.vec3f(0.529, 0.8, 0.91),
       (caustic * 0.5 + 0.5) * heightGlow * 0.35,
     ),
   );
@@ -331,14 +373,11 @@ const fragmentFn = tgpu.fragmentFn({
 
 export const createLiquidEffect: ShaderEffectFactory = (root) => {
   const paramsBuffer = root
-    .createBuffer(LiquidParams, createParams(createEmptyDroplets(), 0, 0, 0, 0))
+    .createBuffer(
+      LiquidParams,
+      createParams(createEmptyDroplets(), 0, 0, 0, 0, d.vec2f(1, 1)),
+    )
     .$usage("uniform");
-  const fields = [0, 1].map((index) =>
-    root
-      .createTexture({ size: [SIM_SIZE, SIM_SIZE], format: "rgba16float" })
-      .$usage("storage", "sampled")
-      .$name(`liquid-field-${index}`),
-  );
   const linearSampler = root.createSampler({
     magFilter: "linear",
     minFilter: "linear",
@@ -348,29 +387,66 @@ export const createLiquidEffect: ShaderEffectFactory = (root) => {
     vertex: renderFn,
     fragment: fragmentFn,
   });
-  const simulationBindGroups = [0, 1].map((sourceIndex) =>
-    root.createBindGroup(simulationLayout, {
-      current: fields[sourceIndex].createView(d.texture2d(d.f32)),
-      next: fields[1 - sourceIndex].createView(
-        d.textureStorage2d("rgba16float", "write-only"),
-      ),
-      params: paramsBuffer,
-    }),
-  );
-  const renderBindGroups = [0, 1].map((index) =>
-    root.createBindGroup(renderLayout, {
-      field: fields[index].createView(d.texture2d(d.f32)),
-      params: paramsBuffer,
-      linearSampler,
-    }),
-  );
-  const dispatchCount = Math.ceil(SIM_SIZE / WORKGROUP_SIZE);
 
   let currentFieldIndex = 0;
+  let simulationResources: ReturnType<typeof createSimulationResources> | null =
+    null;
   let previousPeak = 0;
   let dropletCharge = 0;
   let lastProcessedAudioReadId = 0;
   let rngState = 0x6d2b79f5;
+
+  function createSimulationResources(simSize: number) {
+    const fields = [0, 1].map((index) =>
+      root
+        .createTexture({ size: [simSize, simSize], format: "rgba16float" })
+        .$usage("storage", "sampled")
+        .$name(`liquid-field-${index}`),
+    );
+    const simulationBindGroups = [0, 1].map((sourceIndex) =>
+      root.createBindGroup(simulationLayout, {
+        current: fields[sourceIndex].createView(d.texture2d(d.f32)),
+        next: fields[1 - sourceIndex].createView(
+          d.textureStorage2d("rgba16float", "write-only"),
+        ),
+        params: paramsBuffer,
+      }),
+    );
+    const renderBindGroups = [0, 1].map((index) =>
+      root.createBindGroup(renderLayout, {
+        field: fields[index].createView(d.texture2d(d.f32)),
+        params: paramsBuffer,
+        linearSampler,
+      }),
+    );
+
+    return {
+      simSize,
+      fields,
+      simulationBindGroups,
+      renderBindGroups,
+      dispatchCount: Math.ceil(simSize / WORKGROUP_SIZE),
+    };
+  }
+
+  const disposeSimulationResources = () => {
+    simulationResources?.fields.forEach((field) => {
+      field.destroy();
+    });
+    simulationResources = null;
+    currentFieldIndex = 0;
+  };
+
+  const getSimulationResources = (simSize: number) => {
+    if (simulationResources?.simSize === simSize) {
+      return simulationResources;
+    }
+
+    disposeSimulationResources();
+    simulationResources = createSimulationResources(simSize);
+
+    return simulationResources;
+  };
 
   const random = () => {
     rngState = (rngState * 1664525 + 1013904223) >>> 0;
@@ -382,6 +458,7 @@ export const createLiquidEffect: ShaderEffectFactory = (root) => {
     audioLevel: number,
     peak: number,
     brightness: number,
+    simSize: number,
   ) => {
     const droplets = createEmptyDroplets();
     const baseAngle = random() * Math.PI * 2;
@@ -404,7 +481,7 @@ export const createLiquidEffect: ShaderEffectFactory = (root) => {
             Math.min(0.92, centerY + Math.sin(scatterAngle) * scatter),
           ),
         ),
-        radius: DROPLET_POINT_RADIUS,
+        radius: getDropletPointRadius(simSize),
         strength:
           polarity *
           (0.08 + peak * 0.16 + audioLevel * 0.085 + brightness * 0.02) *
@@ -418,7 +495,9 @@ export const createLiquidEffect: ShaderEffectFactory = (root) => {
 
   return {
     audioAnalyserReadIntervalMs: AUDIO_ANALYSER_READ_INTERVAL_MS,
-    render: (ctx, audioFrame, elapsedSeconds) => {
+    render: (ctx, audioFrame, elapsedSeconds, canvasSize) => {
+      const simSize = getLiquidSimulationSize(canvasSize);
+      const resources = getSimulationResources(simSize);
       const audioLevel = clamp01(
         audioFrame.level * 0.42 +
           audioFrame.smoothedLevel * 0.78 +
@@ -459,7 +538,13 @@ export const createLiquidEffect: ShaderEffectFactory = (root) => {
         }
       }
 
-      const droplets = buildDroplets(dropCount, audioLevel, peak, brightness);
+      const droplets = buildDroplets(
+        dropCount,
+        audioLevel,
+        peak,
+        brightness,
+        simSize,
+      );
       paramsBuffer.write(
         createParams(
           droplets,
@@ -467,24 +552,23 @@ export const createLiquidEffect: ShaderEffectFactory = (root) => {
           elapsedSeconds,
           audioLevel,
           brightness,
+          getCanvasScale(canvasSize),
         ),
       );
 
       advancePipeline
-        .with(simulationBindGroups[currentFieldIndex])
-        .dispatchWorkgroups(dispatchCount, dispatchCount);
+        .with(resources.simulationBindGroups[currentFieldIndex])
+        .dispatchWorkgroups(resources.dispatchCount, resources.dispatchCount);
       currentFieldIndex = 1 - currentFieldIndex;
 
       renderPipeline
         .withColorAttachment({ view: ctx })
-        .with(renderBindGroups[currentFieldIndex])
+        .with(resources.renderBindGroups[currentFieldIndex])
         .draw(3);
     },
     dispose: () => {
       paramsBuffer.destroy();
-      fields.forEach((field) => {
-        field.destroy();
-      });
+      disposeSimulationResources();
     },
   };
 };

@@ -2969,6 +2969,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@typegpu/noise@npm:^0.11.0":
+  version: 0.11.0
+  resolution: "@typegpu/noise@npm:0.11.0"
+  peerDependencies:
+    typegpu: ^0.11.0
+  checksum: 10c0/3c54a1424d8596e8dfac3f728a8787b4fdd4d81b9620b0d7fc701457772075bc4be7ec67012feb34a3bc03f940bcc5d83557a981c328bed1e20824ac42f971a1
+  languageName: node
+  linkType: hard
+
 "@typegpu/react@npm:^0.11.0":
   version: 0.11.0
   resolution: "@typegpu/react@npm:0.11.0"
@@ -8999,6 +9008,7 @@ __metadata:
     "@react-navigation/bottom-tabs": "npm:^7.4.0"
     "@react-navigation/elements": "npm:^2.6.3"
     "@react-navigation/native": "npm:^7.1.8"
+    "@typegpu/noise": "npm:^0.11.0"
     "@typegpu/react": "npm:^0.11.0"
     "@types/react": "npm:~19.1.0"
     "@webgpu/types": "npm:^0.1.70"
@@ -9031,6 +9041,7 @@ __metadata:
     typescript: "npm:~5.9.2"
     unplugin-typegpu: "npm:^0.11.3"
     vite: "npm:^6.1.1"
+    wgpu-matrix: "npm:^3.4.2"
   languageName: unknown
   linkType: soft
 
@@ -10430,6 +10441,13 @@ __metadata:
   version: 0.6.2
   resolution: "webpack-virtual-modules@npm:0.6.2"
   checksum: 10c0/5ffbddf0e84bf1562ff86cf6fcf039c74edf09d78358a6904a09bbd4484e8bb6812dc385fe14330b715031892dcd8423f7a88278b57c9f5002c84c2860179add
+  languageName: node
+  linkType: hard
+
+"wgpu-matrix@npm:^3.4.2":
+  version: 3.4.2
+  resolution: "wgpu-matrix@npm:3.4.2"
+  checksum: 10c0/0a6674e512348241c15c94da73e4d10beff8ee6b08e5c9abb9c57fbee23eac8fe58ef12d23bddd2f325f58368c23c2a21400611ae1570d02d46daec819a33486
   languageName: node
   linkType: hard
 
