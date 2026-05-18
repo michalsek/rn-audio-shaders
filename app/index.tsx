@@ -1,10 +1,13 @@
 import { AudioControls } from "@/components/AudioControls";
 import { useAudioSession } from "@/hooks/useAudioSession";
 import { createShaderEffect, type ShaderEffect } from "@/shaderEffects";
+import { FABRIC_BALL_RUNTIME_CONTROL_DEFAULTS } from "@/shaderEffects/fabricBall";
+import type { FabricBallRuntimeControls } from "@/shaderEffects/types";
 import { useConfigureContext, useFrame, useRoot } from "@typegpu/react";
 import { useEffect, useMemo, useState } from "react";
 import {
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -20,6 +23,35 @@ const CANVAS_SIZE_OPTIONS = [
 ] as const;
 
 type CanvasSizeOption = (typeof CANVAS_SIZE_OPTIONS)[number]["value"];
+type FabricBallControlKey = keyof FabricBallRuntimeControls;
+
+const FABRIC_BALL_CONTROL_OPTIONS = [
+  { key: "radius", label: "Radius", min: 0.62, max: 1.08, step: 0.02 },
+  { key: "amplitude", label: "Relief", min: 0, max: 0.03, step: 0.001 },
+  { key: "foldCount", label: "Folds", min: 60, max: 100, step: 1 },
+  { key: "foldWidth", label: "Width", min: 0.004, max: 0.014, step: 0.001 },
+  {
+    key: "travelSpeed",
+    label: "Travel",
+    min: -0.12,
+    max: 0.14,
+    step: 0.005,
+  },
+  { key: "bend", label: "Bend", min: 0.24, max: 0.9, step: 0.02 },
+  { key: "twist", label: "Twist", min: -0.1, max: 0.42, step: 0.02 },
+  { key: "contraction", label: "Pinch", min: 0, max: 0.08, step: 0.004 },
+  { key: "softness", label: "Softness", min: 0.08, max: 0.22, step: 0.01 },
+  { key: "glow", label: "Glow", min: 0.2, max: 1, step: 0.02 },
+] satisfies {
+  key: FabricBallControlKey;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+}[];
+
+const formatControlValue = (value: number) =>
+  Number.isInteger(value) ? String(value) : value.toFixed(3).replace(/0+$/, "");
 
 export function Home() {
   const root = useRoot();
@@ -29,6 +61,9 @@ export function Home() {
   const [selectedCanvasSize, setSelectedCanvasSize] =
     useState<CanvasSizeOption>("400");
   const [isCanvasSizeSelectOpen, setIsCanvasSizeSelectOpen] = useState(false);
+  const [isFabricControlsOpen, setIsFabricControlsOpen] = useState(false);
+  const [fabricBallControls, setFabricBallControls] =
+    useState<FabricBallRuntimeControls>(FABRIC_BALL_RUNTIME_CONTROL_DEFAULTS);
 
   const {
     audioSource,
@@ -61,12 +96,44 @@ export function Home() {
         height: Number(selectedCanvasSize),
       };
   const canvasKey = `${canvasDimensions.width}x${canvasDimensions.height}`;
+  const runtimeControls = useMemo(
+    () =>
+      selectedEffect === "fabric ball"
+        ? { fabricBall: fabricBallControls }
+        : undefined,
+    [fabricBallControls, selectedEffect],
+  );
 
   useEffect(() => {
     return () => {
       shaderEffect.dispose?.();
     };
   }, [shaderEffect]);
+
+  useEffect(() => {
+    if (selectedEffect !== "fabric ball") {
+      setIsFabricControlsOpen(false);
+    }
+  }, [selectedEffect]);
+
+  const updateFabricBallControl = (
+    key: FabricBallControlKey,
+    delta: number,
+    min: number,
+    max: number,
+  ) => {
+    setFabricBallControls((previousControls) => {
+      const nextValue = Math.min(
+        max,
+        Math.max(min, previousControls[key] + delta),
+      );
+
+      return {
+        ...previousControls,
+        [key]: Number(nextValue.toFixed(3)),
+      };
+    });
+  };
 
   useFrame(({ elapsedSeconds }) => {
     const ctx = ctxRef.current;
@@ -76,7 +143,13 @@ export function Home() {
     }
 
     const audioFrame = readAudioFrame(shaderEffect.audioAnalyserReadIntervalMs);
-    shaderEffect.render(ctx, audioFrame, elapsedSeconds, canvasDimensions);
+    shaderEffect.render(
+      ctx,
+      audioFrame,
+      elapsedSeconds,
+      canvasDimensions,
+      runtimeControls,
+    );
 
     // A react-native-wgpu requirement for flushing the rendered frame.
     ctx.present?.();
@@ -141,6 +214,75 @@ export function Home() {
           </View>
         ) : null}
       </View>
+      {selectedEffect === "fabric ball" ? (
+        <View style={styles.fabricControls}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: isFabricControlsOpen }}
+            onPress={() => setIsFabricControlsOpen((isOpen) => !isOpen)}
+            style={({ pressed }) => [
+              styles.fabricControlsHeader,
+              pressed && styles.buttonPressed,
+            ]}
+          >
+            <Text style={styles.fabricControlsTitle}>Folds</Text>
+            <Text style={styles.selectChevron}>
+              {isFabricControlsOpen ? "^" : "v"}
+            </Text>
+          </Pressable>
+          {isFabricControlsOpen ? (
+            <ScrollView
+              style={styles.fabricControlsList}
+              contentContainerStyle={styles.fabricControlsListContent}
+            >
+              {FABRIC_BALL_CONTROL_OPTIONS.map((control) => (
+                <View key={control.key} style={styles.fabricControlRow}>
+                  <Text style={styles.fabricControlLabel}>{control.label}</Text>
+                  <Pressable
+                    accessibilityLabel={`Decrease ${control.label}`}
+                    accessibilityRole="button"
+                    onPress={() =>
+                      updateFabricBallControl(
+                        control.key,
+                        -control.step,
+                        control.min,
+                        control.max,
+                      )
+                    }
+                    style={({ pressed }) => [
+                      styles.stepperButton,
+                      pressed && styles.buttonPressed,
+                    ]}
+                  >
+                    <Text style={styles.stepperButtonText}>-</Text>
+                  </Pressable>
+                  <Text style={styles.fabricControlValue}>
+                    {formatControlValue(fabricBallControls[control.key])}
+                  </Text>
+                  <Pressable
+                    accessibilityLabel={`Increase ${control.label}`}
+                    accessibilityRole="button"
+                    onPress={() =>
+                      updateFabricBallControl(
+                        control.key,
+                        control.step,
+                        control.min,
+                        control.max,
+                      )
+                    }
+                    style={({ pressed }) => [
+                      styles.stepperButton,
+                      pressed && styles.buttonPressed,
+                    ]}
+                  >
+                    <Text style={styles.stepperButtonText}>+</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </ScrollView>
+          ) : null}
+        </View>
+      ) : null}
       <AudioControls
         selectedEffect={selectedEffect}
         audioSource={audioSource}
@@ -226,5 +368,72 @@ const styles = StyleSheet.create({
   },
   buttonPressed: {
     transform: [{ scale: 0.98 }],
+  },
+  fabricControls: {
+    position: "absolute",
+    top: 108,
+    alignSelf: "center",
+    width: "88%",
+    maxWidth: 340,
+    zIndex: 2,
+    borderRadius: 8,
+    overflow: "hidden",
+    backgroundColor: "rgba(25, 34, 39, 0.94)",
+    borderColor: "rgba(255, 255, 255, 0.24)",
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  fabricControlsHeader: {
+    minHeight: 36,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+  },
+  fabricControlsTitle: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  fabricControlsList: {
+    maxHeight: 320,
+  },
+  fabricControlsListContent: {
+    paddingHorizontal: 8,
+    paddingBottom: 8,
+    gap: 6,
+  },
+  fabricControlRow: {
+    minHeight: 30,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  fabricControlLabel: {
+    flex: 1,
+    color: "rgba(255, 255, 255, 0.82)",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  fabricControlValue: {
+    minWidth: 48,
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  stepperButton: {
+    width: 30,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 6,
+    backgroundColor: "rgba(255, 255, 255, 0.13)",
+    borderColor: "rgba(255, 255, 255, 0.24)",
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  stepperButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
   },
 });
